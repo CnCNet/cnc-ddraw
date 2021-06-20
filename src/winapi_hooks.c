@@ -443,11 +443,49 @@ int WINAPI fake_MapWindowPoints(HWND hWndFrom, HWND hWndTo, LPPOINT lpPoints, UI
     return real_MapWindowPoints(hWndFrom, hWndTo, lpPoints, cPoints);
 }
 
+HHOOK g_mouse_hook;
+HOOKPROC g_mouse_proc;
+LRESULT CALLBACK MouseHandler(int Code, WPARAM wParam, LPARAM lParam)
+{
+    if (Code < 0)
+        return CallNextHookEx(g_mouse_hook, Code, wParam, lParam);
+
+    switch (wParam)
+    {
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+    {
+        if (!g_ddraw->devmode && !g_ddraw->locked)
+        {
+            mouse_lock();
+        }
+        break;
+    }
+    }
+
+    MOUSEHOOKSTRUCTEX mhook;
+    memcpy(&mhook, (void*)lParam, sizeof(MOUSEHOOKSTRUCTEX));
+
+    if (g_ddraw && g_ddraw->hwnd)
+        real_ScreenToClient(g_ddraw->hwnd, &((MOUSEHOOKSTRUCT*)&mhook)->pt);
+
+    LRESULT result = g_mouse_proc(Code, wParam, (LPARAM)&mhook);
+
+    return result == 1 ? CallNextHookEx(g_mouse_hook, Code, wParam, lParam) : result;
+}
+
 HHOOK WINAPI fake_SetWindowsHookExA(int idHook, HOOKPROC lpfn, HINSTANCE hmod, DWORD dwThreadId)
 {
     if (idHook == WH_KEYBOARD_LL && hmod && GetModuleHandle("AcGenral") == hmod)
     {
         return NULL;
+    }
+
+    if (idHook == WH_MOUSE && !g_mouse_hook)
+    {
+        g_mouse_proc = lpfn;
+        return g_mouse_hook = real_SetWindowsHookExA(idHook, MouseHandler, hmod, dwThreadId);
     }
 
     return real_SetWindowsHookExA(idHook, lpfn, hmod, dwThreadId);
